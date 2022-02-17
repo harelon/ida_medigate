@@ -32,13 +32,13 @@ What makes the plugin unique is the fact it uses the same environment the resear
 * IDA 7.5 SP  + Hex-Rays Decompiler + Python 3
   * This version we partially support disassembly with no decompiler
 * Linux - There is no anything that really depends on Linux, but the plugin was tested on IDA Linux version.
-* [ida-referee](https://github.com/joeleong/ida-referee): We use this useful plugin to save xrefs for struct's members uses in the decompiler. The original plugin doesn't support Python3 so we port it (under the directory `plugins/`)
+* [ida-referee](https://github.com/joeleong/ida-referee): We use this useful plugin to save xrefs for struct's members uses in the decompiler.
 
 # Installation:
 
-Copy `medigate_cpp_plugin` to the `plugins` directory and add the source code path to your `idapythonrc.py` file
+Run `pip3 install .` to install the library
 
-Copy `plugins/ida-referee/referee.py`to the same directory.
+Copy `medigate_cpp_plugin` and `referee.py` to the `plugins` directory.
 
 # Features:
 
