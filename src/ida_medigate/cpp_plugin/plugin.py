@@ -1,7 +1,9 @@
 import ida_idaapi
 import ida_kernwin
 import idaapi
+
 from .hooks import CPPHooks, CPPUIHooks, HexRaysHooks
+from ..rtti_parsers.parser_registry import ParserRegistry
 
 
 class CPPPlugin(ida_idaapi.plugin_t):
@@ -45,6 +47,17 @@ class CPPPlugin(ida_idaapi.plugin_t):
         self.gui_hook = CPPUIHooks()
         self.hook()
         self.install_hotkey()
+        def create_parser():
+            if idaapi.get_auto_state() == idaapi.AU_NONE:
+                idaapi.auto_wait()
+                parser = ParserRegistry.get_fitting_parser()
+                if parser is not None:
+                    parser.init_parser()
+                    parser.build_all()
+                return -1
+            return 1000
+        idaapi.register_timer(1000, create_parser)
+
         keep = ida_idaapi.PLUGIN_KEEP
         return keep
 
