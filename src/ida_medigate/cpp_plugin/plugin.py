@@ -50,14 +50,18 @@ class CPPPlugin(ida_idaapi.plugin_t):
         def create_parser():
             if idaapi.get_auto_state() == idaapi.AU_NONE:
                 idaapi.auto_wait()
+                if idaapi.get_inf_structure().cc.id == 0 and not(idaapi.get_inf_structure().is_64bit() or idaapi.get_inf_structure().is_32bit()):
+                    return 1000
                 parser = ParserRegistry.get_fitting_parser()
                 if parser is not None:
                     parser.init_parser()
                     parser.build_all()
                 return -1
             return 1000
-        idaapi.register_timer(1000, create_parser)
-
+        def start_timer(code, old=0):
+            idaapi.register_timer(1000, create_parser)
+        idaapi.notify_when(idaapi.NW_OPENIDB, start_timer)
+        
         keep = ida_idaapi.PLUGIN_KEEP
         return keep
 
