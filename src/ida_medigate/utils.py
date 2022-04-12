@@ -19,6 +19,8 @@ import idc
 
 from idc import BADADDR
 
+log = logging.getLogger("medigate")
+
 # WORD length in bytes
 WORD_LEN = None
 
@@ -27,10 +29,10 @@ def update_word_len(code, old=0):
     global WORD_LEN
     info = idaapi.get_inf_structure()
     if info.is_64bit():
-        logging.debug("is 32 bit")
+        log.debug("is 32 bit")
         WORD_LEN = 8
     elif info.is_32bit():
-        logging.debug("is 32 bit")
+        log.debug("is 32 bit")
         WORD_LEN = 4
 
 
@@ -90,7 +92,7 @@ def get_typeinf_ptr(typeinf):
     if isinstance(typeinf, str):
         typeinf = get_typeinf(typeinf)
     if typeinf is None:
-        logging.warning("Couldn't find typeinf %s", old_typeinf or typeinf)
+        log.warning("Couldn't find typeinf %s", old_typeinf or typeinf)
         return None
     tif = idaapi.tinfo_t()
     tif.create_ptr(typeinf)
@@ -126,13 +128,13 @@ def add_to_struct(
     flag = idaapi.FF_DWORD
     member_size = WORD_LEN
     if member_type is not None and (member_type.is_struct() or member_type.is_union()):
-        logging.debug("Is struct!")
+        log.debug("Is struct!")
         substruct = extract_struct_from_tinfo(member_type)
         if substruct is not None:
             flag = idaapi.FF_STRUCT
             mt = ida_nalt.opinfo_t()
             mt.tid = substruct.id
-            logging.debug(
+            log.debug(
                 f"Is struct: {ida_struct.get_struc_name(substruct.id)}/{substruct.id}"
             )
             member_size = ida_struct.get_struc_size(substruct.id)
@@ -151,14 +153,14 @@ def add_to_struct(
     member_ptr = ida_struct.get_member(struct, offset)
     if overwrite and member_ptr:
         if ida_struct.get_member_name(member_ptr.id) != member_name:
-            logging.debug("Overwriting!")
+            log.debug("Overwriting!")
             ret_val = ida_struct.set_member_name(struct, offset, member_name)
             i = 0
             while ret_val == ida_struct.STRUC_ERROR_MEMBER_NAME:
                 new_member_name = "%s_%d" % (member_name, i)
                 i += 1
                 if i > 250:
-                    logging.debug("failed change name")
+                    log.debug("failed change name")
                     return
                 ret_val = ida_struct.set_member_name(struct, offset, new_member_name)
 
@@ -176,7 +178,7 @@ def add_to_struct(
                 struct, new_member_name, offset, flag, mt, member_size
             )
         if ret_val != 0:
-            logging.debug(f"ret_val: {ret_val}")
+            log.debug(f"ret_val: {ret_val}")
         member_ptr = ida_struct.get_member_by_name(struct, new_member_name)
     if member_type is not None and member_ptr is not None:
         ida_struct.set_member_tinfo(
@@ -285,9 +287,9 @@ def get_signed_int(ea):
 def expand_struct(struct_id, new_size):
     struct = ida_struct.get_struc(struct_id)
     if struct is None:
-        logging.warning("Struct id 0x%x wasn't found", struct_id)
+        log.warning("Struct id 0x%x wasn't found", struct_id)
         return
-    logging.debug(
+    log.debug(
         "Expanding struc %s 0x%x -> 0x%x",
         ida_struct.get_struc_name(struct_id),
         ida_struct.get_struc_size(struct_id),
@@ -312,7 +314,7 @@ def expand_struct(struct_id, new_size):
                     -1,
                     0,
                 )
-                logging.debug(
+                log.debug(
                     "Delete member (0x%x-0x%x)", member.soff, member.soff + new_size - 1
                 )
                 ida_struct.del_struc_members(
@@ -329,15 +331,15 @@ def expand_struct(struct_id, new_size):
                     ]
                 )
             else:
-                logging.warning("Xref wasn't struct_member 0x%x", xref.frm)
+                log.warning("Xref wasn't struct_member 0x%x", xref.frm)
 
     ret = add_to_struct(
         ida_struct.get_struc(struct_id), None, None, new_size - WORD_LEN
     )
-    logging.debug("Now fix args:")
+    log.debug("Now fix args:")
     for fix_args in fix_list:
         ret = idc.add_struc_member(*fix_args)
-        logging.debug("%s = %d", fix_args, ret)
+        log.debug("%s = %d", fix_args, ret)
         x_struct_id = fix_args[0]
         idc.del_struc_member(x_struct_id, ida_struct.get_struc_size(x_struct_id))
 

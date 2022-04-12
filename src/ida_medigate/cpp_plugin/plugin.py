@@ -1,10 +1,22 @@
 import ida_idaapi
 import ida_kernwin
 import idaapi
+import logging
+import os
+import tempfile
+
+
+log = logging.getLogger("medigate")
+file_handler = logging.FileHandler(os.path.join(tempfile.gettempdir(),'medigate.log'))
+file_handler.setLevel(logging.DEBUG)
+
+formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+file_handler.setFormatter(formatter)
+
+log.addHandler(file_handler)
 
 from .hooks import CPPHooks, CPPUIHooks, HexRaysHooks
 from ..rtti_parsers.parser_registry import ParserRegistry
-
 
 class CPPPlugin(ida_idaapi.plugin_t):
     """

@@ -11,6 +11,7 @@ from .parser_registry import ParserRegistry
 from .. import cpp_utils
 from .. import utils
 
+log = logging.getLogger("medigate")
 
 class GccRTTIParser(RTTIParser):
     VMI = "_ZTVN10__cxxabiv121__vmi_class_type_infoE"
@@ -55,9 +56,9 @@ class GccRTTIParser(RTTIParser):
     @classmethod
     def build_all(cls):
         for class_type in cls.types:
-            logging.debug("Starting :%s %s" % (class_type, hex(class_type)))
+            log.debug("Starting :%s %s" % (class_type, hex(class_type)))
             cls.build_class_type(class_type)
-            logging.info("Done %s", class_type)
+            log.info("Done %s", class_type)
 
     @classmethod
     @utils.batchmode
@@ -66,7 +67,7 @@ class GccRTTIParser(RTTIParser):
         for xref in idautils.XrefsTo(class_type - cls.OFFSET_FROM_TYPEINF_SYM):
             if (idx + 1) % 200 == 0:
                 # idc.batch(0)
-                logging.info("\t Done %s", idx)
+                log.info("\t Done %s", idx)
                 # ida_loader.save_database(None, 0)
                 # idc.batch(1)
             if utils.get_ptr(xref.frm) != class_type:
@@ -74,7 +75,7 @@ class GccRTTIParser(RTTIParser):
             try:
                 cls.extract_rtti_info_from_typeinfo(xref.frm)
             except Exception as e:
-                logging.exception("Exception at 0x%x:", xref.frm)
+                log.exception("Exception at 0x%x:", xref.frm)
             idx += 1
 
     @classmethod
@@ -168,15 +169,18 @@ class GccRTTIParser(RTTIParser):
         return cls.get_compiler_abbr() == 'gcc'
 
     def try_parse_vtable(self, ea):
+        #print("try parsing vtable")
         functions_ea = ea + utils.WORD_LEN
         func_ea, _ = cpp_utils.get_vtable_line(
             functions_ea,
             ignore_list=self.types,
             pure_virtual_name=self.pure_virtual_name,
         )
+        #print("get vtable line")
         if func_ea is None:
             return
         vtable_offset = utils.get_signed_int(ea - utils.WORD_LEN) * (-1)
+        #print(vtable_offset)
         vtable_struct, this_type = self.create_vtable_struct(vtable_offset)
         cpp_utils.update_vtable_struct(
             functions_ea,

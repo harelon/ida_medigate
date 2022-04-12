@@ -13,6 +13,7 @@ from .parser_registry import ParserRegistry
 from .. import cpp_utils
 from .. import utils
 
+log = logging.getLogger("medigate")
 
 class VcRTTIParser(RTTIParser):
     type_info_string = ".?AVtype_info@@"
@@ -53,7 +54,7 @@ class VcRTTIParser(RTTIParser):
     @classmethod
     def build_all(cls):
         if cls.type_info is None:
-            logging.error("Couldn't Find any rtti information")
+            log.error("Couldn't Find any rtti information")
             return
         # every rtti type descriptor is a static struct containing pointer to the vtable of type_info
         for rtd in idautils.XrefsTo(cls.type_info):
@@ -61,7 +62,7 @@ class VcRTTIParser(RTTIParser):
             if idc.get_func_name(rtd.frm):
                 continue
             cls.build_class_type(rtd.frm)
-            logging.info("Done %s", rtd)
+            log.info("Done %s", rtd)
 
     @classmethod
     @utils.batchmode
@@ -69,7 +70,7 @@ class VcRTTIParser(RTTIParser):
             try:
                 cls.extract_rtti_info_from_typeinfo(class_type)
             except Exception as e:
-                logging.exception("Exception at 0x%x:", class_type)
+                log.exception("Exception at 0x%x:", class_type)
 
     @classmethod
     def parse_rtti_header(cls, ea):
