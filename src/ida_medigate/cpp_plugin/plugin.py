@@ -1,14 +1,16 @@
 import ida_idaapi
 import ida_kernwin
-import idaapi
+import ida_auto
+import ida_hexrays
 import logging
 import os
 import tempfile
+from .. import utils
 
 
 log = logging.getLogger("medigate")
-file_handler = logging.FileHandler(os.path.join(tempfile.gettempdir(),'medigate.log'))
-file_handler.setLevel(logging.DEBUG)
+file_handler = logging.FileHandler(os.path.join(tempfile.gettempdir(), 'medigate.log'))
+file_handler.setLevel(logging.INFO)
 
 formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 file_handler.setFormatter(formatter)
@@ -17,6 +19,11 @@ log.addHandler(file_handler)
 
 from .hooks import CPPHooks, CPPUIHooks, HexRaysHooks
 from ..rtti_parsers.parser_registry import ParserRegistry
+
+plugin_state = 0
+last_state = None
+parser = None
+
 
 class CPPPlugin(ida_idaapi.plugin_t):
     """
@@ -46,34 +53,48 @@ class CPPPlugin(ida_idaapi.plugin_t):
         self.hexrays_hooks = None
         self.hooking = False
         self.is_decompiler_on = False
+        self.initialized = False
 
     def init(self):
         """
         This method is called when IDA is loading the plugin. It will first
         load the configuration file, then initialize all the modules.
         """
-        if idaapi.init_hexrays_plugin():
-            self.hexrays_hooks = HexRaysHooks()
-            self.is_decompiler_on = True
-        self.core_hook = CPPHooks(self.is_decompiler_on)
-        self.gui_hook = CPPUIHooks()
-        self.hook()
-        self.install_hotkey()
-        def create_parser():
-            if idaapi.get_auto_state() == idaapi.AU_NONE:
-                idaapi.auto_wait()
-                if idaapi.get_inf_structure().cc.id == 0 and not(idaapi.get_inf_structure().is_64bit() or idaapi.get_inf_structure().is_32bit()):
-                    return 1000
-                parser = ParserRegistry.get_fitting_parser()
-                if parser is not None:
-                    parser.init_parser()
-                    parser.build_all()
-                return -1
-            return 1000
         def start_timer(code, old=0):
-            idaapi.register_timer(1000, create_parser)
-        idaapi.notify_when(idaapi.NW_OPENIDB, start_timer)
-        
+            def parser_yield():
+                global parser
+                global plugin_state
+                if plugin_state == 0 and ida_auto.auto_is_ok():
+                    if not ida_hexrays.init_hexrays_plugin():
+                        log.info("hexrays not initialized yet")
+                        return 1000
+                    self.hexrays_hooks = HexRaysHooks()
+                    self.is_decompiler_on = True
+                    self.core_hook = CPPHooks(self.is_decompiler_on)
+                    self.gui_hook = CPPUIHooks()
+                    self.hook()
+                    self.install_hotkey()
+                    self.initialized = True
+
+                    parser = ParserRegistry.get_fitting_parser()
+                    parser.init_parser()
+                    if parser is None:
+                        log.info("parser failed")
+                        return -1
+                    plugin_state = 1
+                if plugin_state == 1:
+                    if not parser.finished:
+                        parser.next_state()
+                        return 100
+                    return -1
+                return 1000
+            ida_kernwin.register_timer(1000, parser_yield)
+        if utils.WORD_LEN is None:
+            ida_idaapi.notify_when(ida_idaapi.NW_OPENIDB, start_timer)
+        else:
+            start_timer(0, 0)
+
+        # check the PLUGIN_SKIP option, might remove the need for a timer
         keep = ida_idaapi.PLUGIN_KEEP
         return keep
 
@@ -87,15 +108,21 @@ class CPPPlugin(ida_idaapi.plugin_t):
     def hook(self):
         if self.hexrays_hooks:
             self.hexrays_hooks.hook()
-        self.core_hook.hook()
-        self.gui_hook.hook()
+        if self.core_hook:
+            self.core_hook.hook()
+        if self.gui_hook:
+            self.gui_hook.hook()
         self.hooking = True
 
     def unhook(self):
+        if not self.initialized:
+            return
         if self.hexrays_hooks:
             self.hexrays_hooks.unhook()
-        self.core_hook.unhook()
-        self.gui_hook.unhook()
+        if self.core_hook:
+            self.core_hook.unhook()
+        if self.gui_hook:
+            self.gui_hook.unhook()
         self.hooking = False
 
     def install_hotkey(self):
@@ -119,4 +146,4 @@ class CPPPlugin(ida_idaapi.plugin_t):
         terminated all the modules, then save the configuration file.
         """
         self.unhook()
-        idaapi.term_hexrays_plugin()
+        ida_hexrays.term_hexrays_plugin()

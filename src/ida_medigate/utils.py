@@ -29,7 +29,7 @@ def update_word_len(code, old=0):
     global WORD_LEN
     info = idaapi.get_inf_structure()
     if info.is_64bit():
-        log.debug("is 32 bit")
+        log.debug("is 64 bit")
         WORD_LEN = 8
     elif info.is_32bit():
         log.debug("is 32 bit")
@@ -135,7 +135,7 @@ def add_to_struct(
             mt = ida_nalt.opinfo_t()
             mt.tid = substruct.id
             log.debug(
-                f"Is struct: {ida_struct.get_struc_name(substruct.id)}/{substruct.id}"
+                f"Is struct: {ida_struct.get_struc_name(substruct.id)}/{hex(substruct.id)}"
             )
             member_size = ida_struct.get_struc_size(substruct.id)
     elif WORD_LEN == 4:
@@ -494,4 +494,3 @@ def refresh_struct(sptr):
     #  Hack: need to refresh structure so MF_BASECLASS will be updated
     member_ptr = add_to_struct(sptr, "dummy")
     ida_struct.del_struc_member(sptr, member_ptr.soff)
-

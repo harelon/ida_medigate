@@ -267,7 +267,7 @@ def add_child_vtable(parent_name, child_name, child_vtable_id, offset):
     child_vtable_name = ida_struct.get_struc_name(child_vtable_id)
     child_vtable = utils.get_typeinf(child_vtable_name)
     log.debug(
-        "add_to_struct %s %s", parent_vtable_struct.id, str(child_vtable)
+        "add_to_struct %s %s", hex(parent_vtable_struct.id), str(child_vtable)
     )
     if ida_struct.get_struc_size(child_vtable_id) == 0:
         utils.add_to_struct(
@@ -300,7 +300,7 @@ def update_func_this(func_ea, this_type=None):
                 func_details[0].name = "this"
                 func_details[0].type = this_type
         functype = utils.update_func_details(func_ea, func_details)
-    except ida_hexrays.DecompilationFailure as e:
+    except ida_hexrays.DecompilationFailure as _:
         log.exception("Couldn't decompile 0x%x", func_ea)
     return functype
 
@@ -331,7 +331,6 @@ def post_func_name_change(new_name, ea):
         member, old_name, struct = ida_struct.get_member_by_id(xref.frm)
         if member is not None and struct is not None:
             args_list.append([struct, member.get_soff(), new_name])
-
     return utils.set_member_name, args_list
 
 
@@ -482,7 +481,7 @@ def find_valid_cppname_in_line(line, idx):
                 break
         end_idx += 1
     if end_idx > start_idx:
-        return line[start_idx + 1 : end_idx]
+        return line[start_idx + 1: end_idx]
     return None
 
 

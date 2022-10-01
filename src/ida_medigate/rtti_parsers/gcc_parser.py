@@ -13,6 +13,7 @@ from .. import utils
 
 log = logging.getLogger("medigate")
 
+
 class GccRTTIParser(RTTIParser):
     VMI = "_ZTVN10__cxxabiv121__vmi_class_type_infoE"
     SI = "_ZTVN10__cxxabiv120__si_class_type_infoE"
@@ -54,29 +55,16 @@ class GccRTTIParser(RTTIParser):
         cls.types = (cls.type_vmi, cls.type_si, cls.type_none)
 
     @classmethod
-    def build_all(cls):
+    def find_rttis(cls):
         for class_type in cls.types:
-            log.debug("Starting :%s %s" % (class_type, hex(class_type)))
-            cls.build_class_type(class_type)
-            log.info("Done %s", class_type)
-
-    @classmethod
-    @utils.batchmode
-    def build_class_type(cls, class_type):
-        idx = 0
-        for xref in idautils.XrefsTo(class_type - cls.OFFSET_FROM_TYPEINF_SYM):
-            if (idx + 1) % 200 == 0:
-                # idc.batch(0)
-                log.info("\t Done %s", idx)
-                # ida_loader.save_database(None, 0)
-                # idc.batch(1)
-            if utils.get_ptr(xref.frm) != class_type:
-                continue
-            try:
-                cls.extract_rtti_info_from_typeinfo(xref.frm)
-            except Exception as e:
-                log.exception("Exception at 0x%x:", xref.frm)
-            idx += 1
+            for xref in idautils.XrefsTo(class_type - cls.OFFSET_FROM_TYPEINF_SYM):
+                if utils.get_ptr(xref.frm) != class_type:
+                    continue
+                cls.rtti_queue.append(xref.frm)
+        if len(cls.rtti_queue) == 0:
+            cls.finished = True
+            return False
+        return True
 
     @classmethod
     def parse_rtti_header(cls, ea):
@@ -129,18 +117,21 @@ class GccRTTIParser(RTTIParser):
         return utils.get_ptr(ea + cls.RECORD_TYPEINFO_OFFSET)
 
     @classmethod
-    def get_typeinfo_name(cls, typeinfo_ea):
+    def get_class_name(cls, typeinfo_ea):
         name_ea = utils.get_ptr(typeinfo_ea + cls.CLASS_TYPE_NAME_OFFSET)
         if name_ea is None or name_ea == BADADDR:
             mangled_class_name = ida_name.get_ea_name(typeinfo_ea)
         else:
             mangled_class_name = "_Z" + idc.get_strlit_contents(name_ea).decode()
         class_name = ida_name.demangle_name(mangled_class_name, idc.INF_LONG_DN)
-        return cls.strip_class_name(class_name)
+        return class_name
+
+    @classmethod
+    def get_typeinfo_name(cls, typeinfo_ea):
+        return cls.strip_class_name(cls.get_class_name(typeinfo_ea))
 
     @classmethod
     def strip_class_name(cls, cls_name):
-        pre_dict = {"`typeinfo for": ":"}
         words_dict = {
             "`anonymous namespace'": "ANONYMOUS",
             "`anonymous_namespace'": "ANONYMOUS",
@@ -169,18 +160,15 @@ class GccRTTIParser(RTTIParser):
         return cls.get_compiler_abbr() == 'gcc'
 
     def try_parse_vtable(self, ea):
-        #print("try parsing vtable")
         functions_ea = ea + utils.WORD_LEN
         func_ea, _ = cpp_utils.get_vtable_line(
             functions_ea,
             ignore_list=self.types,
             pure_virtual_name=self.pure_virtual_name,
         )
-        #print("get vtable line")
         if func_ea is None:
             return
         vtable_offset = utils.get_signed_int(ea - utils.WORD_LEN) * (-1)
-        #print(vtable_offset)
         vtable_struct, this_type = self.create_vtable_struct(vtable_offset)
         cpp_utils.update_vtable_struct(
             functions_ea,
@@ -191,6 +179,6 @@ class GccRTTIParser(RTTIParser):
             pure_virtual_name=self.pure_virtual_name,
         )
         return vtable_struct
-    
+
 
 ParserRegistry.register_parser(GccRTTIParser)

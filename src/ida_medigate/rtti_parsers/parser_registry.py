@@ -1,6 +1,6 @@
 class ParserRegistry:
 
-    parsers=list()
+    parsers = list()
 
     @classmethod
     def register_parser(cls, parser):

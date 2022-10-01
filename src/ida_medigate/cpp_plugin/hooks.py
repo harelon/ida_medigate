@@ -11,6 +11,7 @@ import idaapi
 import idc
 from idc import BADADDR
 from .. import cpp_utils, utils
+import time
 
 
 log = logging.getLogger("medigate")
@@ -20,19 +21,23 @@ class CPPHooks(ida_idp.IDB_Hooks):
     def __init__(self, is_decompiler_on):
         super(CPPHooks, self).__init__()
         self.is_decompiler_on = is_decompiler_on
+        self.last_update_action = 0
 
     def renamed(self, ea, new_name, local_name):
+        current_time = time.time() * 1000
+        if current_time - self.last_update_action < 10:
+            return
         if utils.is_func(ea):
-            func, args_list = cpp_utils.post_func_name_change(new_name, ea)
             self.unhook()
+            func, args_list = cpp_utils.post_func_name_change(new_name, ea)
             for args in args_list:
                 func(*args)
             self.hook()
-        return 0
+        self.last_update_action = current_time
 
     def func_updated(self, pfn):
-        func, args_list = cpp_utils.post_func_type_change(pfn)
         self.unhook()
+        func, args_list = cpp_utils.post_func_type_change(pfn)
         for args in args_list:
             func(*args)
         self.hook()
@@ -45,7 +50,10 @@ class CPPHooks(ida_idp.IDB_Hooks):
         return 0
 
     def struc_member_changed(self, sptr, mptr):
+        self.unhook()
         cpp_utils.post_struct_member_type_change(mptr)
+        self.hook()
+        self.should_update = True
         return 0
 
     def ti_changed(self, ea, typeinf, fnames):
@@ -56,16 +64,15 @@ class CPPHooks(ida_idp.IDB_Hooks):
                 if sptr.is_frame():
                     func = ida_funcs.get_func(ida_frame.get_func_by_frame(sptr.id))
                     if func is not None:
-                        return self.func_updated(func)
+                        self.func_updated(func)
             elif utils.is_func(ea):
-                return self.func_updated(ida_funcs.get_func(ea))
-        return 0
+                self.func_updated(ida_funcs.get_func(ea))
 
 
 class CPPUIHooks(ida_kernwin.View_Hooks):
     def view_dblclick(self, viewer, point):
         widget_type = ida_kernwin.get_widget_type(viewer)
-        if not (widget_type == 48 or widget_type == 28):
+        if not (widget_type == ida_kernwin.BWN_PSEUDOCODE or widget_type == ida_kernwin.BWN_STRUCTS):
             return
         # Decompiler or Structures window
         func_cand_name = None
@@ -95,7 +102,7 @@ class Polymorphism_fixer_visitor_t(ida_hexrays.ctree_visitor_t):
         self.selections = []
 
     def get_vtables_union_name(self, expr):
-        if expr.op != ida_hexrays.cot_memref:
+        if expr.op != ida_hexrays.cot_memref:  # ///< x.m
             return None
         typeinf = expr.type
         if typeinf is None:
@@ -234,7 +241,7 @@ class Polymorphism_fixer_visitor_t(ida_hexrays.ctree_visitor_t):
         vtable_struct_name = ida_struct.get_struc_name(vtable_sptr.id)
         try:
             funcptr_member = ida_struct.get_member(vtable_sptr, offset)
-        except TypeError as e:
+        except TypeError as _:
             log.exception("0x%x: bad offset: 0x%x", self.cfunc.entry_ea, offset)
             return None
 
@@ -284,9 +291,9 @@ class Polymorphism_fixer_visitor_t(ida_hexrays.ctree_visitor_t):
             ida_hexrays.cot_call,
         ]:
             if e.op in [ida_hexrays.cot_memref, ida_hexrays.cot_memptr]:
-                log.debug("(%s, %d, %s", e.opname, e.m, e.type.dstr())
+                log.debug("(%s, %d, %s)", e.opname, e.m, e.type.dstr())
             else:
-                log.debug("(%s, %s", e.opname, e.type.dstr())
+                log.debug("(%s, %s)", e.opname, e.type.dstr())
             e = e.x
 
     def find_ea(self):

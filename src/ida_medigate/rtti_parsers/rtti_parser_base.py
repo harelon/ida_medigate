@@ -11,17 +11,20 @@ from .. import utils
 
 log = logging.getLogger("medigate")
 
+
 class RTTIParser(object):
     RTTI_OBJ_STRUC_NAME = "rtti_obj"
+    finished = False
+    rtti_queue = list()
 
     @classmethod
     def init_parser(cls):
-        cls.found_classes = set()
-    
+        cls.found_classes = dict()
+
     @classmethod
     def get_compiler_abbr(cls):
         return idaapi.get_compiler_abbr(idaapi.get_inf_structure().cc.id)
-    
+
     @classmethod
     def extract_rtti_info_from_data(cls, ea=None):
         if ea is None:
@@ -32,12 +35,11 @@ class RTTIParser(object):
     @classmethod
     def extract_rtti_info_from_typeinfo(cls, typeinfo):
         if typeinfo in cls.found_classes:
-            return
+            return cls.found_classes[typeinfo]
         rtti_obj = cls.parse_typeinfo(typeinfo)
         if rtti_obj is None:
             return
-        log.info("%s: Parsed typeinfo", rtti_obj.name)
-        cls.found_classes.add(rtti_obj.typeinfo)
+        cls.found_classes[rtti_obj.typeinfo] = rtti_obj
         for parent_typeinfo, _, offset in rtti_obj.raw_parents:
             parent_updated_name = None
             parent_rtti_obj = cls.extract_rtti_info_from_typeinfo(parent_typeinfo)
@@ -122,6 +124,26 @@ class RTTIParser(object):
             if len(self.updated_parents) == 0:
                 cpp_utils.install_vtables_union(self.name)
                 pass
+
+    @classmethod
+    def next_state(cls):
+        if len(cls.rtti_queue) == 0:
+            if cls.finished:
+                log.info("Didn't find any rtti")
+            elif cls.find_rttis():
+                log.info("Found %d rtti structs", len(cls.rtti_queue))
+        else:
+            cls.build()
+
+    @classmethod
+    def build(cls):
+        if len(cls.rtti_queue) > 0:
+            rtti = cls.rtti_queue.pop()
+            cls.extract_rtti_info_from_typeinfo(rtti)
+            log.info("Done %s at 0x%x", cls.get_class_name(rtti), rtti)
+        if len(cls.rtti_queue) == 0:
+            log.info("Finished analyzing rtti")
+            cls.finished = True
 
     def try_parse_vtable(self, ea):
         pass

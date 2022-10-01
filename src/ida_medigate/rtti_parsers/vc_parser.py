@@ -6,7 +6,8 @@ import idautils
 import ida_bytes
 import ida_xref
 import idc
-from idaapi import BADADDR
+import ida_ida
+from idc import BADADDR
 
 from .rtti_parser_base import RTTIParser
 from .parser_registry import ParserRegistry
@@ -15,8 +16,9 @@ from .. import utils
 
 log = logging.getLogger("medigate")
 
+
 class VcRTTIParser(RTTIParser):
-    type_info_string = ".?AVtype_info@@"
+    type_info_string = '".?AVtype_info@@"'
     pure_virtual_name = "_purecall"
 
     @classmethod
@@ -34,43 +36,46 @@ class VcRTTIParser(RTTIParser):
 
         cls.CHD_COUNT = 8
         cls.CHD_ARRAY = 12
-        
 
         # RBCD means RTTI Base Class Descriptor
         cls.RBCD_RTD = 0
         cls.RBCD_SUB_COUNT = cls.RVA_SIZE
         cls.RBCD_MEMBER_DISPLACEMENT = cls.RBCD_SUB_COUNT + 4
-        
+
         cls.ZERO_INHERITANCE = 1
 
         cls.TYPE_DESCRIPTION_TO_HIERARCHEY_OFFSET = utils.WORD_LEN
         cls.type_info = None
 
-        for string in idautils.Strings():
-            if str(string) == cls.type_info_string:
-                cls.type_info = utils.get_word(string.ea - cls.RTD_NAME)
-                break
+        cls.binpat = idaapi.compiled_binpat_vec_t()
+        ida_bytes.parse_binpat_str(cls.binpat, 0, cls.type_info_string, 16)
+        cls.search_step = 8000
+        cls.current_pos = ida_ida.inf_get_min_ea()
+        cls.max_pos = ida_ida.inf_get_max_ea()
+
+    # this function is lazy, it searches for the rtti in search_step sized segments
+    @classmethod
+    def find_rttis(cls):
+        chunk_end = min(cls.current_pos + cls.search_step, cls.max_pos)
+        if cls.current_pos == cls.max_pos:
+            cls.finished = True
+            return False
+        string_loc = ida_bytes.bin_search(cls.current_pos, chunk_end, cls.binpat, 0)
+        if string_loc == BADADDR:
+            cls.current_pos = chunk_end - len(cls.type_info_string)
+            return False
+        cls.type_info = utils.get_word(string_loc - cls.RTD_NAME)
+        if cls.type_info is not None:
+            # every rtti type descriptor is a static struct containing pointer to the vtable of type_info
+            for rtd in idautils.XrefsTo(cls.type_info):
+                # make sure the pointer to the vtable is from a data object and not a function
+                if ida_bytes.is_data(ida_bytes.get_flags(rtd.frm)):
+                    cls.rtti_queue.append(rtd.frm)
+            return True
 
     @classmethod
-    def build_all(cls):
-        if cls.type_info is None:
-            log.error("Couldn't Find any rtti information")
-            return
-        # every rtti type descriptor is a static struct containing pointer to the vtable of type_info
-        for rtd in idautils.XrefsTo(cls.type_info):
-            # make sure the pointer to the vtable is from a data object and not a function
-            if idc.get_func_name(rtd.frm):
-                continue
-            cls.build_class_type(rtd.frm)
-            log.info("Done %s", rtd)
-
-    @classmethod
-    @utils.batchmode
-    def build_class_type(cls, class_type):
-            try:
-                cls.extract_rtti_info_from_typeinfo(class_type)
-            except Exception as e:
-                log.exception("Exception at 0x%x:", class_type)
+    def get_class_name(cls, rtd_addr):
+        return cls.demangle_name(idc.get_strlit_contents(rtd_addr + cls.RTD_NAME).decode("ascii"))
 
     @classmethod
     def parse_rtti_header(cls, ea):
@@ -80,19 +85,21 @@ class VcRTTIParser(RTTIParser):
 
     @classmethod
     def parse_typeinfo(cls, typeinfo):
-        parents = list() 
+        parents = list()
+        actual_ref = None
         # check refrences to the type descriptor
         for xref in idautils.XrefsTo(typeinfo):
             # if the next word after the reference to our type descriptor is also a reference it means we are inside
             # the complete object locator
             if len(list(idautils.XrefsFrom(xref.frm - cls.COL_RTD + cls.COL_CHD))) > 0:
+                actual_ref = xref.frm
                 break
+        if actual_ref is None:
+            return
         # get the COL
-        class_type = xref.frm - cls.COL_RTD
-        
+        class_type = actual_ref - cls.COL_RTD
         chd_ptr = class_type + cls.COL_CHD
-        
-        chd =  cls.get_rva_dref(chd_ptr) 
+        chd = cls.get_rva_dref(chd_ptr)
         parents_len = utils.get_signed_int(chd + cls.CHD_COUNT)
         # iterate over the Base class array
         if parents_len > cls.ZERO_INHERITANCE:
@@ -123,8 +130,7 @@ class VcRTTIParser(RTTIParser):
 
     @classmethod
     def get_typeinfo_name(cls, typeinfo_ea):
-        mangled_class_name = idc.get_strlit_contents(typeinfo_ea + cls.RTD_NAME).decode("ascii")
-        return cls.strip_class_name(cls.demangle_name(mangled_class_name))
+        return cls.strip_class_name(cls.get_class_name(typeinfo_ea))
 
     @classmethod
     def demangle_name(cls, cls_name):
@@ -172,6 +178,8 @@ class VcRTTIParser(RTTIParser):
         if len(list(idautils.XrefsFrom(col + self.COL_CHD))) == 0:
             return
 
+        func_ea = None
+
         # get a valid reference to the virtual table with our rtti
         for ea in utils.get_drefs(col):
             functions_ea = ea + utils.WORD_LEN
@@ -185,7 +193,7 @@ class VcRTTIParser(RTTIParser):
         if func_ea is None:
             return
 
-        vtable_offset = utils.get_signed_int(col + self.COL_VTABLE_OFFSET)  
+        vtable_offset = utils.get_signed_int(col + self.COL_VTABLE_OFFSET)
         vtable_struct, this_type = self.create_vtable_struct(vtable_offset)
         cpp_utils.update_vtable_struct(
             functions_ea,
